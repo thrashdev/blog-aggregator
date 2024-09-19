@@ -18,6 +18,8 @@ import (
 	"github.com/thrashdev/blog-aggregator/internal/database"
 )
 
+type authedHandler func(http.ResponseWriter, *http.Request, database.User)
+
 type apiConfig struct {
 	DB *database.Queries
 }
@@ -104,15 +106,24 @@ func createUserHandler(config apiConfig) http.HandlerFunc {
 	}
 }
 
-func getUserByApiKeyHandler(config apiConfig) http.HandlerFunc {
+func (config *apiConfig) getUserByApiKeyHandler(w http.ResponseWriter, r *http.Request, user database.User) {
+	userDto := userDTO{ID: user.ID, CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt, Name: user.Name.String, Apikey: user.Apikey}
+	respondWithJSON(w, 200, userDto)
+}
+
+func (config *apiConfig) middlewareAuth(handler authedHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		apiKey := strings.Replace(authHeader, "ApiKey ", "", 1)
 		ctx := r.Context()
 		user, err := config.DB.GetUserByApiKey(ctx, apiKey)
 		printError(err)
-		userDto := userDTO{ID: user.ID, CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt, Name: user.Name.String, Apikey: user.Apikey}
-		respondWithJSON(w, 200, userDto)
+		if user == (database.User{}) {
+			respondWithError(w, 400, "User not found")
+			return
+		}
+
+		handler(w, r, user)
 	}
 }
 
@@ -130,7 +141,7 @@ func main() {
 	serveMux.HandleFunc("GET /v1/healthz", handlerReadiness)
 	serveMux.HandleFunc("GET /v1/err", handlerErrResp)
 	serveMux.HandleFunc("POST /v1/users", createUserHandler(config))
-	serveMux.HandleFunc("GET /v1/users", getUserByApiKeyHandler(config))
+	serveMux.HandleFunc("GET /v1/users", config.middlewareAuth(config.getUserByApiKeyHandler))
 	server := http.Server{Handler: serveMux, Addr: ":" + port}
 	server.ListenAndServe()
 }
