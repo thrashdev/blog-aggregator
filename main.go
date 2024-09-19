@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +20,14 @@ import (
 
 type apiConfig struct {
 	DB *database.Queries
+}
+
+type userDTO struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Name      string    `json:"name"`
+	Apikey    string    `json:"api_key"`
 }
 
 func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) error {
@@ -95,6 +104,18 @@ func createUserHandler(config apiConfig) http.HandlerFunc {
 	}
 }
 
+func getUserByApiKeyHandler(config apiConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		apiKey := strings.Replace(authHeader, "ApiKey ", "", 1)
+		ctx := r.Context()
+		user, err := config.DB.GetUserByApiKey(ctx, apiKey)
+		printError(err)
+		userDto := userDTO{ID: user.ID, CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt, Name: user.Name.String, Apikey: user.Apikey}
+		respondWithJSON(w, 200, userDto)
+	}
+}
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
@@ -109,6 +130,7 @@ func main() {
 	serveMux.HandleFunc("GET /v1/healthz", handlerReadiness)
 	serveMux.HandleFunc("GET /v1/err", handlerErrResp)
 	serveMux.HandleFunc("POST /v1/users", createUserHandler(config))
+	serveMux.HandleFunc("GET /v1/users", getUserByApiKeyHandler(config))
 	server := http.Server{Handler: serveMux, Addr: ":" + port}
 	server.ListenAndServe()
 }

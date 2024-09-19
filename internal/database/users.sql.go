@@ -14,9 +14,9 @@ import (
 )
 
 const createUser = `-- name: CreateUser :one
-insert into users(id, created_at, updated_at, name)
-values ($1, $2, $3, $4)
-RETURNING id, created_at, updated_at, name
+insert into users(id, created_at, updated_at, name, apikey)
+values ($1, $2, $3, $4, $5)
+RETURNING id, created_at, updated_at, name, apikey
 `
 
 type CreateUserParams struct {
@@ -24,6 +24,7 @@ type CreateUserParams struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	Name      sql.NullString
+	Apikey    string
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
@@ -32,6 +33,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.Name,
+		arg.Apikey,
 	)
 	var i User
 	err := row.Scan(
@@ -39,6 +41,25 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Name,
+		&i.Apikey,
+	)
+	return i, err
+}
+
+const getUserByApiKey = `-- name: GetUserByApiKey :one
+select id, created_at, updated_at, name, apikey from users
+where apikey = $1
+`
+
+func (q *Queries) GetUserByApiKey(ctx context.Context, apikey string) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByApiKey, apikey)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Name,
+		&i.Apikey,
 	)
 	return i, err
 }
