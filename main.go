@@ -32,6 +32,15 @@ type userDTO struct {
 	Apikey    string    `json:"api_key"`
 }
 
+type feedDTO struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Name      string    `json:"name"`
+	Url       string    `json:"url"`
+	UserID    uuid.UUID `json:"user_id"`
+}
+
 func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) error {
 	resp, err := json.Marshal(payload)
 	if err != nil {
@@ -127,6 +136,39 @@ func (config *apiConfig) middlewareAuth(handler authedHandler) http.HandlerFunc 
 	}
 }
 
+func (config *apiConfig) createFeedHandler(w http.ResponseWriter, r *http.Request, user database.User) {
+	type parameters struct {
+		Name string `json:"name"`
+		Url  string `json:"url"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		err_msg := fmt.Sprintf("Error decoding parameters %v ", err)
+		log.Printf(err_msg)
+		respondWithError(w, 500, err_msg)
+		return
+	}
+	name := sql.NullString{String: params.Name, Valid: true}
+	url := sql.NullString{String: params.Url, Valid: true}
+	newFeed := database.CreateFeedParams{ID: uuid.New(), CreatedAt: time.Now(), UpdatedAt: time.Now(), Name: name, Url: url, UserID: user.ID}
+	ctx := r.Context()
+	feed, err := config.DB.CreateFeed(ctx, newFeed)
+	printError(err)
+	feedDto := feedDTO{ID: feed.ID, CreatedAt: feed.CreatedAt, UpdatedAt: feed.UpdatedAt, Name: feed.Name.String, Url: feed.Name.String, UserID: feed.UserID}
+	respondWithJSON(w, 200, feedDto)
+
+}
+
+func (config *apiConfig) getFeedsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	feeds, err := config.DB.GetFeeds(ctx)
+	printError(err)
+	respondWithJSON(w, 200, feeds)
+
+}
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
@@ -142,6 +184,8 @@ func main() {
 	serveMux.HandleFunc("GET /v1/err", handlerErrResp)
 	serveMux.HandleFunc("POST /v1/users", createUserHandler(config))
 	serveMux.HandleFunc("GET /v1/users", config.middlewareAuth(config.getUserByApiKeyHandler))
+	serveMux.HandleFunc("POST /v1/feeds", config.middlewareAuth(config.createFeedHandler))
+	serveMux.HandleFunc("GET /v1/feeds", config.getFeedsHandler)
 	server := http.Server{Handler: serveMux, Addr: ":" + port}
 	server.ListenAndServe()
 }
