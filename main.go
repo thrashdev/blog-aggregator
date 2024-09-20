@@ -41,6 +41,14 @@ type feedDTO struct {
 	UserID    uuid.UUID `json:"user_id"`
 }
 
+type feedFollowDTO struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	FeedID    uuid.UUID `json:"feed_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) error {
 	resp, err := json.Marshal(payload)
 	if err != nil {
@@ -155,9 +163,24 @@ func (config *apiConfig) createFeedHandler(w http.ResponseWriter, r *http.Reques
 	newFeed := database.CreateFeedParams{ID: uuid.New(), CreatedAt: time.Now(), UpdatedAt: time.Now(), Name: name, Url: url, UserID: user.ID}
 	ctx := r.Context()
 	feed, err := config.DB.CreateFeed(ctx, newFeed)
-	printError(err)
-	feedDto := feedDTO{ID: feed.ID, CreatedAt: feed.CreatedAt, UpdatedAt: feed.UpdatedAt, Name: feed.Name.String, Url: feed.Name.String, UserID: feed.UserID}
-	respondWithJSON(w, 200, feedDto)
+	if err != nil {
+		printError(err)
+		respondWithError(w, 500, err.Error())
+	}
+	feedDto := feedDTO{ID: feed.ID, CreatedAt: feed.CreatedAt, UpdatedAt: feed.UpdatedAt, Name: feed.Name.String, Url: feed.Url.String, UserID: feed.UserID}
+	newFeedFollow := database.CreateFeedFollowParams{ID: uuid.New(), UserID: user.ID, FeedID: feed.ID, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	feedFollow, err := config.DB.CreateFeedFollow(ctx, newFeedFollow)
+	if err != nil {
+		printError(err)
+		respondWithError(w, 500, err.Error())
+	}
+	feedFollowDto := feedFollowDTO{ID: feedFollow.ID, UserID: feedFollow.UserID, FeedID: feedFollow.FeedID, CreatedAt: feedFollow.CreatedAt, UpdatedAt: feedFollow.UpdatedAt}
+	type jsonResponse struct {
+		Feed       feedDTO       `json:"feed"`
+		FeedFollow feedFollowDTO `json:"feed_follow"`
+	}
+	resp := jsonResponse{Feed: feedDto, FeedFollow: feedFollowDto}
+	respondWithJSON(w, 200, resp)
 
 }
 
@@ -167,6 +190,72 @@ func (config *apiConfig) getFeedsHandler(w http.ResponseWriter, r *http.Request)
 	printError(err)
 	respondWithJSON(w, 200, feeds)
 
+}
+
+func (config *apiConfig) createFeedFollowHandler(w http.ResponseWriter, r *http.Request, user database.User) {
+	type parameters struct {
+		FeedID uuid.UUID `json:"feed_id"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		err_msg := fmt.Sprintf("Error decoding parameters %v ", err)
+		log.Printf(err_msg)
+		respondWithError(w, 500, err_msg)
+		return
+	}
+	ctx := r.Context()
+	newFeedFollow := database.CreateFeedFollowParams{ID: uuid.New(), UserID: user.ID, FeedID: params.FeedID, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	feedFollow, err := config.DB.CreateFeedFollow(ctx, newFeedFollow)
+	printError(err)
+	if err != nil {
+		respondWithError(w, 500, err.Error())
+		return
+	}
+	respondWithJSON(w, 200, feedFollow)
+
+}
+
+func (config *apiConfig) deleteFeedFollowHandler(w http.ResponseWriter, r *http.Request, user database.User) {
+	stringFeedFollowID := r.PathValue("feedFollowID")
+	feedFollowID, err := uuid.Parse(stringFeedFollowID)
+	printError(err)
+	if err != nil {
+		respondWithError(w, 500, err.Error())
+		return
+	}
+	ctx := r.Context()
+	feedFollows, err := config.DB.GetFeedFollowsByUserID(ctx, user.ID)
+	feedFollowToDelete := database.FeedFollow{}
+	for _, feedFollow := range feedFollows {
+		if feedFollow.ID == feedFollowID && feedFollow.UserID == user.ID {
+			feedFollowToDelete = feedFollow
+		}
+	}
+	if feedFollowToDelete == (database.FeedFollow{}) {
+		respondWithError(w, 400, "Feed follow not found")
+		return
+	}
+	err = config.DB.DeleteFeedFollowsByID(ctx, feedFollowID)
+	if err != nil {
+		printError(err)
+		respondWithError(w, 500, err.Error())
+		return
+	}
+	w.WriteHeader(204)
+
+}
+
+func (config *apiConfig) getFeedFollowsHandler(w http.ResponseWriter, r *http.Request, user database.User) {
+	ctx := r.Context()
+	feedFollows, err := config.DB.GetFeedFollowsByUserID(ctx, user.ID)
+	printError(err)
+	if err != nil {
+		respondWithError(w, 500, err.Error())
+		return
+	}
+	respondWithJSON(w, 200, feedFollows)
 }
 
 func main() {
@@ -186,6 +275,9 @@ func main() {
 	serveMux.HandleFunc("GET /v1/users", config.middlewareAuth(config.getUserByApiKeyHandler))
 	serveMux.HandleFunc("POST /v1/feeds", config.middlewareAuth(config.createFeedHandler))
 	serveMux.HandleFunc("GET /v1/feeds", config.getFeedsHandler)
+	serveMux.HandleFunc("GET /v1/feed_follows", config.middlewareAuth(config.getFeedFollowsHandler))
+	serveMux.HandleFunc("POST /v1/feed_follows", config.middlewareAuth(config.createFeedFollowHandler))
+	serveMux.HandleFunc("DELETE /v1/feed_follows/{feedFollowID}", config.middlewareAuth(config.deleteFeedFollowHandler))
 	server := http.Server{Handler: serveMux, Addr: ":" + port}
 	server.ListenAndServe()
 }
