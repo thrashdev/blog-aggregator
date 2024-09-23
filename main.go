@@ -16,6 +16,7 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/thrashdev/blog-aggregator/internal/database"
+	"github.com/thrashdev/blog-aggregator/internal/rss"
 )
 
 type authedHandler func(http.ResponseWriter, *http.Request, database.User)

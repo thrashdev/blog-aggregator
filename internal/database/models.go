@@ -18,6 +18,7 @@ type Feed struct {
 	Name      sql.NullString
 	Url       sql.NullString
 	UserID    uuid.UUID
+	FetchedAt sql.NullTime
 }
 
 type FeedFollow struct {
