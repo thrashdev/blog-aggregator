@@ -263,34 +263,38 @@ func (config *apiConfig) getFeedFollowsHandler(w http.ResponseWriter, r *http.Re
 }
 
 func (config *apiConfig) workerFeedsFetch(feedstoFetch int) {
-	fmt.Println("Started worker...")
-	var wg sync.WaitGroup
-	ctx := context.Background()
+	ticker := time.NewTicker(60 * time.Second)
+	fmt.Println("Ticker started")
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			fmt.Println("Worker is running...")
+			var wg sync.WaitGroup
+			ctx := context.Background()
 
-	feeds, err := config.DB.GetNextFeedsToFetch(ctx, int32(feedstoFetch))
-	if err != nil {
-		log.Fatalf(err.Error())
-	}
-	for _, nextFeed := range feeds {
-		wg.Add(1)
-		go func(feedUrl string) {
-			fmt.Println("Processing: ", feedUrl)
-			fmt.Println("Url: ", feedUrl)
-			feed, err := rss.FetchFeed(feedUrl)
+			feeds, err := config.DB.GetNextFeedsToFetch(ctx, int32(feedstoFetch))
 			if err != nil {
-				log.Println("Error encountered while processing: ", feedUrl)
 				log.Fatalf(err.Error())
 			}
-			fmt.Println(feed)
-			for _, item := range feed.Channel.Items {
-				fmt.Println("Processing item: ", item.Title)
-				fmt.Println(item.Title)
-			}
-			wg.Done()
-		}(nextFeed.Url.String)
-	}
 
-	wg.Wait()
+			for _, nextFeed := range feeds {
+				wg.Add(1)
+				go func(feedUrl string) {
+					feed, err := rss.FetchFeed(feedUrl)
+					if err != nil {
+						log.Println("Error encountered while processing: ", feedUrl)
+						log.Panic(err.Error())
+					}
+					for _, item := range feed.Channel.Items {
+						fmt.Println(item.Title)
+					}
+					wg.Done()
+				}(nextFeed.Url.String)
+			}
+			wg.Wait()
+		}
+	}
 }
 
 // func (config *apiConfig) processFeed(feedUrl string) {
@@ -309,29 +313,22 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	// url := "https://blog.boot.dev/index.xml"
-	// xml, err := rss.FetchFeed(url)
-	// if err != nil {
-	// 	log.Fatalf(err.Error())
-	// }
-	// fmt.Println(xml)
-	// port := os.Getenv("PORT")
+	port := os.Getenv("PORT")
 	dbURL := os.Getenv("connection_string")
 	db, err := sql.Open("postgres", dbURL)
 	dbQueries := database.New(db)
 	config := apiConfig{DB: dbQueries}
-	config.workerFeedsFetch(feedsToFetch)
-	// serveMux := http.NewServeMux()
-	// serveMux.HandleFunc("GET /v1/healthz", handlerReadiness)
-	// serveMux.HandleFunc("GET /v1/err", handlerErrResp)
-	// serveMux.HandleFunc("POST /v1/users", createUserHandler(config))
-	// serveMux.HandleFunc("GET /v1/users", config.middlewareAuth(config.getUserByApiKeyHandler))
-	// serveMux.HandleFunc("POST /v1/feeds", config.middlewareAuth(config.createFeedHandler))
-	// serveMux.HandleFunc("GET /v1/feeds", config.getFeedsHandler)
-	// serveMux.HandleFunc("GET /v1/feed_follows", config.middlewareAuth(config.getFeedFollowsHandler))
-	// serveMux.HandleFunc("POST /v1/feed_follows", config.middlewareAuth(config.createFeedFollowHandler))
-	// serveMux.HandleFunc("DELETE /v1/feed_follows/{feedFollowID}", config.middlewareAuth(config.deleteFeedFollowHandler))
-	// server := http.Server{Handler: serveMux, Addr: ":" + port}
-	// server.ListenAndServe()
+	go config.workerFeedsFetch(feedsToFetch)
+	serveMux := http.NewServeMux()
+	serveMux.HandleFunc("GET /v1/healthz", handlerReadiness)
+	serveMux.HandleFunc("GET /v1/err", handlerErrResp)
+	serveMux.HandleFunc("POST /v1/users", createUserHandler(config))
+	serveMux.HandleFunc("GET /v1/users", config.middlewareAuth(config.getUserByApiKeyHandler))
+	serveMux.HandleFunc("POST /v1/feeds", config.middlewareAuth(config.createFeedHandler))
+	serveMux.HandleFunc("GET /v1/feeds", config.getFeedsHandler)
+	serveMux.HandleFunc("GET /v1/feed_follows", config.middlewareAuth(config.getFeedFollowsHandler))
+	serveMux.HandleFunc("POST /v1/feed_follows", config.middlewareAuth(config.createFeedFollowHandler))
+	serveMux.HandleFunc("DELETE /v1/feed_follows/{feedFollowID}", config.middlewareAuth(config.deleteFeedFollowHandler))
+	server := http.Server{Handler: serveMux, Addr: ":" + port}
+	server.ListenAndServe()
 }
