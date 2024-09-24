@@ -401,5 +401,4 @@ func main() {
 	// serveMux.HandleFunc("DELETE /v1/feed_follows/{feedFollowID}", config.middlewareAuth(config.deleteFeedFollowHandler))
 	// server := http.Server{Handler: serveMux, Addr: ":" + port}
 	// server.ListenAndServe()
->>>>>>> fac6b6d (update to work in CLI)
 }
