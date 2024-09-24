@@ -8,19 +8,65 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 
-	"os"
 	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/joho/godotenv"
+	// "github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/thrashdev/blog-aggregator/internal/config"
 	"github.com/thrashdev/blog-aggregator/internal/database"
 	"github.com/thrashdev/blog-aggregator/internal/rss"
 )
+
+type state struct {
+	cfg *config.Config
+}
+
+type command struct {
+	name      string
+	arguments []string
+}
+
+type commands struct {
+	handlers map[string]func(*state, command) error
+}
+
+func (c *commands) register(name string, f func(*state, command) error) {
+	c.handlers[name] = f
+}
+
+func (c *commands) run(s *state, cmd command) error {
+	fmt.Println(c.handlers)
+	fmt.Println(cmd.name)
+	handler, ok := c.handlers[cmd.name]
+	if !ok {
+		return errors.New(fmt.Sprintf("Command %v does not exist", cmd.name))
+	}
+	err := handler(s, cmd)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func handlerLogin(s *state, cmd command) error {
+	if len(cmd.arguments) == 0 {
+		return errors.New("Login expects a username")
+	}
+	username := cmd.arguments[0]
+	err := s.cfg.SetUser(username)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	fmt.Printf("User %v has logged in\n", username)
+	return nil
+}
 
 type authedHandler func(http.ResponseWriter, *http.Request, database.User)
 
@@ -308,27 +354,52 @@ func (config *apiConfig) workerFeedsFetch(feedstoFetch int) {
 // }
 
 func main() {
-	const feedsToFetch = 10
-	err := godotenv.Load()
+	// const feedsToFetch = 10
+	// err := godotenv.Load()
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	cfg, err := config.Read()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalln(err)
 	}
-	port := os.Getenv("PORT")
-	dbURL := os.Getenv("connection_string")
-	db, err := sql.Open("postgres", dbURL)
-	dbQueries := database.New(db)
-	config := apiConfig{DB: dbQueries}
-	go config.workerFeedsFetch(feedsToFetch)
-	serveMux := http.NewServeMux()
-	serveMux.HandleFunc("GET /v1/healthz", handlerReadiness)
-	serveMux.HandleFunc("GET /v1/err", handlerErrResp)
-	serveMux.HandleFunc("POST /v1/users", createUserHandler(config))
-	serveMux.HandleFunc("GET /v1/users", config.middlewareAuth(config.getUserByApiKeyHandler))
-	serveMux.HandleFunc("POST /v1/feeds", config.middlewareAuth(config.createFeedHandler))
-	serveMux.HandleFunc("GET /v1/feeds", config.getFeedsHandler)
-	serveMux.HandleFunc("GET /v1/feed_follows", config.middlewareAuth(config.getFeedFollowsHandler))
-	serveMux.HandleFunc("POST /v1/feed_follows", config.middlewareAuth(config.createFeedFollowHandler))
-	serveMux.HandleFunc("DELETE /v1/feed_follows/{feedFollowID}", config.middlewareAuth(config.deleteFeedFollowHandler))
-	server := http.Server{Handler: serveMux, Addr: ":" + port}
-	server.ListenAndServe()
+	st := state{cfg: &cfg}
+	handlers := map[string]func(*state, command) error{
+		"login": handlerLogin,
+	}
+	cmds := commands{handlers: handlers}
+	args := os.Args
+	if len(args) < 2 {
+		log.Fatal("No arguments provided")
+	}
+	cmd := command{name: args[1], arguments: args[2:]}
+	err = cmds.run(&st, cmd)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	// url := "https://blog.boot.dev/index.xml"
+	// xml, err := rss.FetchFeed(url)
+	// if err != nil {
+	// 	log.Fatalf(err.Error())
+	// }
+	// fmt.Println(xml)
+	// port := os.Getenv("PORT")
+	// dbURL := os.Getenv("connection_string")
+	// db, err := sql.Open("postgres", dbURL)
+	// dbQueries := database.New(db)
+	// config := apiConfig{DB: dbQueries}
+	// config.workerFeedsFetch(feedsToFetch)
+	// serveMux := http.NewServeMux()
+	// serveMux.HandleFunc("GET /v1/healthz", handlerReadiness)
+	// serveMux.HandleFunc("GET /v1/err", handlerErrResp)
+	// serveMux.HandleFunc("POST /v1/users", createUserHandler(config))
+	// serveMux.HandleFunc("GET /v1/users", config.middlewareAuth(config.getUserByApiKeyHandler))
+	// serveMux.HandleFunc("POST /v1/feeds", config.middlewareAuth(config.createFeedHandler))
+	// serveMux.HandleFunc("GET /v1/feeds", config.getFeedsHandler)
+	// serveMux.HandleFunc("GET /v1/feed_follows", config.middlewareAuth(config.getFeedFollowsHandler))
+	// serveMux.HandleFunc("POST /v1/feed_follows", config.middlewareAuth(config.createFeedFollowHandler))
+	// serveMux.HandleFunc("DELETE /v1/feed_follows/{feedFollowID}", config.middlewareAuth(config.deleteFeedFollowHandler))
+	// server := http.Server{Handler: serveMux, Addr: ":" + port}
+	// server.ListenAndServe()
+>>>>>>> fac6b6d (update to work in CLI)
 }
