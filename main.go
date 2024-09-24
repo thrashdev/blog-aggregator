@@ -23,8 +23,11 @@ import (
 	"github.com/thrashdev/blog-aggregator/internal/rss"
 )
 
+type commandHandler func(s *state, cmd command) error
+
 type state struct {
 	cfg *config.Config
+	db  *database.Queries
 }
 
 type command struct {
@@ -33,7 +36,7 @@ type command struct {
 }
 
 type commands struct {
-	handlers map[string]func(*state, command) error
+	handlers map[string]commandHandler
 }
 
 func (c *commands) register(name string, f func(*state, command) error) {
@@ -59,12 +62,78 @@ func handlerLogin(s *state, cmd command) error {
 		return errors.New("Login expects a username")
 	}
 	username := cmd.arguments[0]
-	err := s.cfg.SetUser(username)
+	ctx := context.Background()
+	users, err := s.db.GetUsers(ctx)
+	if err != nil {
+		return err
+	}
+
+	userExists := false
+	for _, dbUser := range users {
+		if username == dbUser.Name.String {
+			userExists = true
+			break
+		}
+	}
+
+	if !userExists {
+		return fmt.Errorf("User %v not found", username)
+	}
+	err = s.cfg.SetUser(username)
 	if err != nil {
 		log.Println(err)
 		return err
 	}
 	fmt.Printf("User %v has logged in\n", username)
+	return nil
+}
+
+func handlerRegisterUser(s *state, cmd command) error {
+	if len(cmd.arguments) == 0 {
+		return errors.New("Please provide username")
+	}
+	username := cmd.arguments[0]
+	ctx := context.Background()
+	createUserArgs := database.CreateUserParams{ID: uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Name:      sql.NullString{String: username, Valid: true}}
+	user, err := s.db.CreateUser(ctx, createUserArgs)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	s.cfg.SetUser(username)
+	fmt.Println(user)
+	return nil
+
+}
+
+func handlerResetUsers(s *state, cmd command) error {
+	ctx := context.Background()
+	err := s.db.DeleteAllUsers(ctx)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	return nil
+}
+
+func handlerGetUsers(s *state, cmd command) error {
+	ctx := context.Background()
+	users, err := s.db.GetUsers(ctx)
+	if err != nil {
+		return err
+	}
+	usersText := make([]string, len(users))
+	prefix := "* "
+	for i, user := range users {
+		if user.Name.String == s.cfg.CurrentUser {
+			usersText[i] = prefix + user.Name.String + " (current)"
+			continue
+		}
+		usersText[i] = prefix + user.Name.String
+	}
+	result := strings.Join(usersText, "\n")
+	fmt.Println(result)
 	return nil
 }
 
@@ -363,9 +432,15 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	st := state{cfg: &cfg}
-	handlers := map[string]func(*state, command) error{
-		"login": handlerLogin,
+	fmt.Print("dbURL: ", cfg.DbURL)
+	db, err := sql.Open("postgres", cfg.DbURL)
+	dbQueries := database.New(db)
+	st := state{cfg: &cfg, db: dbQueries}
+	handlers := map[string]commandHandler{
+		"login":    handlerLogin,
+		"register": handlerRegisterUser,
+		"reset":    handlerResetUsers,
+		"users":    handlerGetUsers,
 	}
 	cmds := commands{handlers: handlers}
 	args := os.Args
