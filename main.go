@@ -44,8 +44,6 @@ func (c *commands) register(name string, f func(*state, command) error) {
 }
 
 func (c *commands) run(s *state, cmd command) error {
-	fmt.Println(c.handlers)
-	fmt.Println(cmd.name)
 	handler, ok := c.handlers[cmd.name]
 	if !ok {
 		return errors.New(fmt.Sprintf("Command %v does not exist", cmd.name))
@@ -134,6 +132,89 @@ func handlerGetUsers(s *state, cmd command) error {
 	}
 	result := strings.Join(usersText, "\n")
 	fmt.Println(result)
+	return nil
+}
+
+func handlerAggregation(s *state, cmd command) error {
+	url := "https://www.wagslane.dev/index.xml"
+	feed, err := rss.FetchFeed(url)
+	if err != nil {
+		return err
+	}
+	fmt.Println(feed)
+	return nil
+}
+
+func handlerAddFeed(s *state, cmd command) error {
+	if len(cmd.arguments) < 2 {
+		return errors.New("addfeed expects 2 arguments: name and url")
+	}
+	name := cmd.arguments[0]
+	url := cmd.arguments[1]
+	ctx := context.Background()
+	user, err := s.db.GetUserByName(ctx, sql.NullString{String: s.cfg.CurrentUser, Valid: true})
+	if err != nil {
+		return err
+	}
+	feedArgs := database.CreateFeedParams{ID: uuid.New(), CreatedAt: time.Now(), UpdatedAt: time.Now(), Name: sql.NullString{String: name, Valid: true}, Url: sql.NullString{String: url, Valid: true}, UserID: user.ID}
+	feed, err := s.db.CreateFeed(ctx, feedArgs)
+	if err != nil {
+		return err
+	}
+	followArgs := database.CreateFeedFollowCLIParams{ID: uuid.New(), UserID: user.ID, FeedID: feed.ID, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	_, err = s.db.CreateFeedFollowCLI(ctx, followArgs)
+	if err != nil {
+		return err
+	}
+	fmt.Println(feed)
+	return nil
+}
+
+func handlerGetFeeds(s *state, cmd command) error {
+	ctx := context.Background()
+	feedData, err := s.db.GetFeedsAndUsernames(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Println(feedData)
+	return nil
+}
+
+func handlerAddFollow(s *state, cmd command) error {
+	if len(cmd.arguments) < 1 {
+		return errors.New("Provide a url to follow")
+	}
+	url := cmd.arguments[0]
+	ctx := context.Background()
+	user, err := s.db.GetUserByName(ctx, sql.NullString{String: s.cfg.CurrentUser, Valid: true})
+	if err != nil {
+		return err
+	}
+	feed, err := s.db.GetFeedByUrl(ctx, sql.NullString{String: url, Valid: true})
+	if err != nil {
+		return err
+	}
+	followArgs := database.CreateFeedFollowCLIParams{ID: uuid.New(), UserID: user.ID, FeedID: feed.ID, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	follow, err := s.db.CreateFeedFollowCLI(ctx, followArgs)
+	if err != nil {
+		return err
+	}
+	fmt.Println(follow)
+	return nil
+
+}
+
+func handlerGetFollowsCurrentUser(s *state, cmd command) error {
+	ctx := context.Background()
+	user, err := s.db.GetUserByName(ctx, sql.NullString{String: s.cfg.CurrentUser, Valid: true})
+	if err != nil {
+		return err
+	}
+	follows, err := s.db.GetFeedFollowsByUserIDCLI(ctx, user.ID)
+	if err != nil {
+		return err
+	}
+	fmt.Println(follows)
 	return nil
 }
 
@@ -432,15 +513,19 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	fmt.Print("dbURL: ", cfg.DbURL)
 	db, err := sql.Open("postgres", cfg.DbURL)
 	dbQueries := database.New(db)
 	st := state{cfg: &cfg, db: dbQueries}
 	handlers := map[string]commandHandler{
-		"login":    handlerLogin,
-		"register": handlerRegisterUser,
-		"reset":    handlerResetUsers,
-		"users":    handlerGetUsers,
+		"login":     handlerLogin,
+		"register":  handlerRegisterUser,
+		"reset":     handlerResetUsers,
+		"users":     handlerGetUsers,
+		"agg":       handlerAggregation,
+		"addfeed":   handlerAddFeed,
+		"feeds":     handlerGetFeeds,
+		"follow":    handlerAddFollow,
+		"following": handlerGetFollowsCurrentUser,
 	}
 	cmds := commands{handlers: handlers}
 	args := os.Args

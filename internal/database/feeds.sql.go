@@ -50,6 +50,26 @@ func (q *Queries) CreateFeed(ctx context.Context, arg CreateFeedParams) (Feed, e
 	return i, err
 }
 
+const getFeedByUrl = `-- name: GetFeedByUrl :one
+select id, created_at, updated_at, name, url, user_id, fetched_at from feeds
+where url = $1
+`
+
+func (q *Queries) GetFeedByUrl(ctx context.Context, url sql.NullString) (Feed, error) {
+	row := q.db.QueryRowContext(ctx, getFeedByUrl, url)
+	var i Feed
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Name,
+		&i.Url,
+		&i.UserID,
+		&i.FetchedAt,
+	)
+	return i, err
+}
+
 const getFeeds = `-- name: GetFeeds :many
 select id, created_at, updated_at, name, url, user_id, fetched_at from feeds
 `
@@ -71,6 +91,46 @@ func (q *Queries) GetFeeds(ctx context.Context) ([]Feed, error) {
 			&i.Url,
 			&i.UserID,
 			&i.FetchedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getFeedsAndUsernames = `-- name: GetFeedsAndUsernames :many
+select f.id, f.name, f.url, u.name as username from feeds f 
+join users u on f.user_id = u.id
+`
+
+type GetFeedsAndUsernamesRow struct {
+	ID       uuid.UUID
+	Name     sql.NullString
+	Url      sql.NullString
+	Username sql.NullString
+}
+
+func (q *Queries) GetFeedsAndUsernames(ctx context.Context) ([]GetFeedsAndUsernamesRow, error) {
+	rows, err := q.db.QueryContext(ctx, getFeedsAndUsernames)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetFeedsAndUsernamesRow
+	for rows.Next() {
+		var i GetFeedsAndUsernamesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Url,
+			&i.Username,
 		); err != nil {
 			return nil, err
 		}

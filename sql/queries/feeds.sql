@@ -15,3 +15,11 @@ SET fetched_at = Now(),
     updated_at = Now()
 WHERE id = $1
 RETURNING *;
+
+-- name: GetFeedsAndUsernames :many
+select f.id, f.name, f.url, u.name as username from feeds f 
+join users u on f.user_id = u.id;
+
+-- name: GetFeedByUrl :one
+select * from feeds
+where url = $1;

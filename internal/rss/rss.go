@@ -3,6 +3,7 @@ package rss
 import (
 	"encoding/xml"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 )
@@ -42,6 +43,18 @@ func FetchFeed(url string) (Feed, error) {
 		fmt.Println(err)
 		return Feed{}, err
 	}
+
+	rss.Channel.Title = html.UnescapeString(rss.Channel.Title)
+	rss.Channel.Description = html.UnescapeString(rss.Channel.Description)
+
+	newItems := []Item{}
+	for _, i := range rss.Channel.Items {
+		newItem := i
+		newItem.Title = html.UnescapeString(newItem.Title)
+		newItem.Description = html.UnescapeString(newItem.Description)
+		newItems = append(newItems, newItem)
+	}
+	rss.Channel.Items = newItems
 
 	return rss, nil
 }

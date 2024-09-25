@@ -2,7 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"os"
@@ -22,7 +21,6 @@ func Read() (Config, error) {
 		log.Println(err.Error())
 		return Config{}, err
 	}
-	fmt.Println(filePath)
 	configFile, err := os.Open(filePath)
 	if err != nil {
 		log.Println(err.Error())
