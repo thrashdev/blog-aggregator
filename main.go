@@ -24,6 +24,7 @@ import (
 )
 
 type commandHandler func(s *state, cmd command) error
+type authedCommandHandler func(s *state, cmd command, user database.User) error
 
 type state struct {
 	cfg *config.Config
@@ -53,6 +54,20 @@ func (c *commands) run(s *state, cmd command) error {
 		return err
 	}
 	return nil
+}
+
+func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
+	return func(s *state, cmd command) error {
+		fmt.Printf("Authenticating user: %s\n", s.cfg.CurrentUser)
+		ctx := context.Background()
+		dbUser, err := s.db.GetUserByName(ctx, sql.NullString{String: s.cfg.CurrentUser, Valid: true})
+		if err != nil {
+			return err
+		}
+
+		return handler(s, cmd, dbUser)
+	}
+
 }
 
 func handlerLogin(s *state, cmd command) error {
@@ -145,17 +160,13 @@ func handlerAggregation(s *state, cmd command) error {
 	return nil
 }
 
-func handlerAddFeed(s *state, cmd command) error {
+func handlerAddFeed(s *state, cmd command, user database.User) error {
 	if len(cmd.arguments) < 2 {
 		return errors.New("addfeed expects 2 arguments: name and url")
 	}
 	name := cmd.arguments[0]
 	url := cmd.arguments[1]
 	ctx := context.Background()
-	user, err := s.db.GetUserByName(ctx, sql.NullString{String: s.cfg.CurrentUser, Valid: true})
-	if err != nil {
-		return err
-	}
 	feedArgs := database.CreateFeedParams{ID: uuid.New(), CreatedAt: time.Now(), UpdatedAt: time.Now(), Name: sql.NullString{String: name, Valid: true}, Url: sql.NullString{String: url, Valid: true}, UserID: user.ID}
 	feed, err := s.db.CreateFeed(ctx, feedArgs)
 	if err != nil {
@@ -180,16 +191,16 @@ func handlerGetFeeds(s *state, cmd command) error {
 	return nil
 }
 
-func handlerAddFollow(s *state, cmd command) error {
+func handlerAddFollow(s *state, cmd command, user database.User) error {
 	if len(cmd.arguments) < 1 {
 		return errors.New("Provide a url to follow")
 	}
 	url := cmd.arguments[0]
 	ctx := context.Background()
-	user, err := s.db.GetUserByName(ctx, sql.NullString{String: s.cfg.CurrentUser, Valid: true})
-	if err != nil {
-		return err
-	}
+	// user, err := s.db.GetUserByName(ctx, sql.NullString{String: s.cfg.CurrentUser, Valid: true})
+	// if err != nil {
+	// 	return err
+	// }
 	feed, err := s.db.GetFeedByUrl(ctx, sql.NullString{String: url, Valid: true})
 	if err != nil {
 		return err
@@ -204,17 +215,29 @@ func handlerAddFollow(s *state, cmd command) error {
 
 }
 
-func handlerGetFollowsCurrentUser(s *state, cmd command) error {
+func handlerGetFollowsCurrentUser(s *state, cmd command, user database.User) error {
 	ctx := context.Background()
-	user, err := s.db.GetUserByName(ctx, sql.NullString{String: s.cfg.CurrentUser, Valid: true})
-	if err != nil {
-		return err
-	}
+	// user, err := s.db.GetUserByName(ctx, sql.NullString{String: s.cfg.CurrentUser, Valid: true})
+	// if err != nil {
+	// 	return err
+	// }
 	follows, err := s.db.GetFeedFollowsByUserIDCLI(ctx, user.ID)
 	if err != nil {
 		return err
 	}
 	fmt.Println(follows)
+	return nil
+}
+
+func handlerRemoveFollow(s *state, cmd command, user database.User) error {
+	url := cmd.arguments[0]
+	ctx := context.Background()
+	args := database.DeleteFollowByUserNameFeedUrlParams{Url: sql.NullString{String: url, Valid: true}, Name: user.Name}
+	err := s.db.DeleteFollowByUserNameFeedUrl(ctx, args)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Deleted follow for feed with url: %s, and username: %s ", url, user.Name.String)
 	return nil
 }
 
@@ -522,10 +545,11 @@ func main() {
 		"reset":     handlerResetUsers,
 		"users":     handlerGetUsers,
 		"agg":       handlerAggregation,
-		"addfeed":   handlerAddFeed,
+		"addfeed":   middlewareLoggedIn(handlerAddFeed),
 		"feeds":     handlerGetFeeds,
-		"follow":    handlerAddFollow,
-		"following": handlerGetFollowsCurrentUser,
+		"follow":    middlewareLoggedIn(handlerAddFollow),
+		"following": middlewareLoggedIn(handlerGetFollowsCurrentUser),
+		"unfollow":  middlewareLoggedIn(handlerRemoveFollow),
 	}
 	cmds := commands{handlers: handlers}
 	args := os.Args
@@ -535,7 +559,8 @@ func main() {
 	cmd := command{name: args[1], arguments: args[2:]}
 	err = cmds.run(&st, cmd)
 	if err != nil {
-		log.Fatalln(err)
+		log.Println("Encountered an error while executing command")
+		log.Fatalln("Error: ", err)
 	}
 	// url := "https://blog.boot.dev/index.xml"
 	// xml, err := rss.FetchFeed(url)
