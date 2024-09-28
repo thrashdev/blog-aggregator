@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 
 	"runtime/debug"
@@ -168,8 +169,18 @@ func scrapeFeed(s *state) error {
 	fmt.Printf("Fetching %s\n", feedToFetch.Name)
 	feed, err := rss.FetchFeed(feedToFetch.Url.String)
 	for _, item := range feed.Channel.Items {
-		fmt.Println(item.Title)
+		pubDate, err := time.Parse(time.RFC1123Z, item.PubDate)
+		if err != nil {
+			return err
+		}
+		postArgs := database.CreatePostParams{ID: uuid.New(), Url: item.Link, Title: item.Title, FeedID: feedToFetch.ID, CreatedAt: time.Now(), UpdatedAt: sql.NullTime{Time: time.Time{}, Valid: false}, Description: sql.NullString{String: item.Description, Valid: true}, PublishedAt: sql.NullTime{Time: pubDate, Valid: true}}
+		post, err := s.db.CreatePost(ctx, postArgs)
+		if err != nil {
+			log.Printf("Error while creating post: %s\n", post.Title)
+			log.Println(err)
+		}
 	}
+
 	if err != nil {
 		return err
 	}
@@ -272,6 +283,28 @@ func handlerRemoveFollow(s *state, cmd command, user database.User) error {
 	}
 	fmt.Printf("Deleted follow for feed with url: %s, and username: %s ", url, user.Name.String)
 	return nil
+}
+
+func handlerBrowsePosts(s *state, cmd command, user database.User) error {
+	var limit int32
+	if len(cmd.arguments) == 0 {
+		limit = 2
+	} else {
+		lString, err := strconv.Atoi(cmd.arguments[0])
+		limit = int32(lString)
+		if err != nil {
+			return err
+		}
+	}
+	ctx := context.Background()
+	getPostsArgs := database.GetPostsByUserParams{Name: sql.NullString{String: s.cfg.CurrentUser, Valid: true}, Limit: int32(limit)}
+	posts, err := s.db.GetPostsByUser(ctx, getPostsArgs)
+	if err != nil {
+		return err
+	}
+	fmt.Println(posts)
+	return nil
+
 }
 
 type authedHandler func(http.ResponseWriter, *http.Request, database.User)
@@ -583,6 +616,7 @@ func main() {
 		"follow":    middlewareLoggedIn(handlerAddFollow),
 		"following": middlewareLoggedIn(handlerGetFollowsCurrentUser),
 		"unfollow":  middlewareLoggedIn(handlerRemoveFollow),
+		"browse":    middlewareLoggedIn(handlerBrowsePosts),
 	}
 	cmds := commands{handlers: handlers}
 	args := os.Args
