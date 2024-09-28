@@ -150,14 +150,47 @@ func handlerGetUsers(s *state, cmd command) error {
 	return nil
 }
 
-func handlerAggregation(s *state, cmd command) error {
-	url := "https://www.wagslane.dev/index.xml"
-	feed, err := rss.FetchFeed(url)
+func scrapeFeed(s *state) error {
+	ctx := context.Background()
+	feedsToFetch, err := s.db.GetNextFeedsToFetch(ctx, 1)
+	if len(feedsToFetch) == 0 {
+		return errors.New("No feeds in database to fetch")
+	}
+	fmt.Println(feedsToFetch)
+	feedToFetch := feedsToFetch[0]
 	if err != nil {
 		return err
 	}
-	fmt.Println(feed)
+	_, err = s.db.MarkFeedFetched(ctx, feedToFetch.ID)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Fetching %s\n", feedToFetch.Name)
+	feed, err := rss.FetchFeed(feedToFetch.Url.String)
+	for _, item := range feed.Channel.Items {
+		fmt.Println(item.Title)
+	}
+	if err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func handlerAggregation(s *state, cmd command) error {
+	dur := cmd.arguments[0]
+	freq, err := time.ParseDuration(dur)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Collecting feeds every %s\n", freq)
+	ticker := time.NewTicker(freq)
+	for ; ; <-ticker.C {
+		err := scrapeFeed(s)
+		if err != nil {
+			return err
+		}
+	}
 }
 
 func handlerAddFeed(s *state, cmd command, user database.User) error {
