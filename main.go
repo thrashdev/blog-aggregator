@@ -286,6 +286,7 @@ func handlerRemoveFollow(s *state, cmd command, user database.User) error {
 }
 
 func handlerBrowsePosts(s *state, cmd command, user database.User) error {
+	const bulletpoint = "\u2022"
 	var limit int32
 	if len(cmd.arguments) == 0 {
 		limit = 2
@@ -302,7 +303,19 @@ func handlerBrowsePosts(s *state, cmd command, user database.User) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(posts)
+	postsByFeed := make(map[string][]database.Post)
+	for _, postRow := range posts {
+		post := database.Post{ID: postRow.ID, CreatedAt: postRow.CreatedAt, UpdatedAt: postRow.UpdatedAt, Title: postRow.Title, Url: postRow.Url, Description: postRow.Description, PublishedAt: postRow.PublishedAt, FeedID: postRow.FeedID}
+		postsByFeed[postRow.Feedname.String] = append(postsByFeed[postRow.Feedname.String], post)
+		// postsByFeed[postRow.Feedname.String] = post
+	}
+	for feed := range postsByFeed {
+		fmt.Printf(" - %v:\n", feed)
+		for _, post := range postsByFeed[feed] {
+			fmt.Printf("\t %s %v\n  \t%v\n \t%v\n\n", bulletpoint, post.Title, post.Url, post.PublishedAt)
+		}
+
+	}
 	return nil
 
 }

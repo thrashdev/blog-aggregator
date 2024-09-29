@@ -5,7 +5,7 @@ $1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: GetPostsByUser :many
-select p.* from posts p
+select p.*, f.name as FeedName from posts p
 join feeds f on p.feed_id = f.id
 join feed_follows ff on ff.feed_id = f.id
 join users u on ff.user_id = u.id

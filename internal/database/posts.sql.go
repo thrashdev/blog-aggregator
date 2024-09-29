@@ -57,7 +57,7 @@ func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, e
 }
 
 const getPostsByUser = `-- name: GetPostsByUser :many
-select p.id, p.created_at, p.updated_at, p.title, p.url, p.description, p.published_at, p.feed_id from posts p
+select p.id, p.created_at, p.updated_at, p.title, p.url, p.description, p.published_at, p.feed_id, f.name as FeedName from posts p
 join feeds f on p.feed_id = f.id
 join feed_follows ff on ff.feed_id = f.id
 join users u on ff.user_id = u.id
@@ -71,15 +71,27 @@ type GetPostsByUserParams struct {
 	Limit int32
 }
 
-func (q *Queries) GetPostsByUser(ctx context.Context, arg GetPostsByUserParams) ([]Post, error) {
+type GetPostsByUserRow struct {
+	ID          uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   sql.NullTime
+	Title       string
+	Url         string
+	Description sql.NullString
+	PublishedAt sql.NullTime
+	FeedID      uuid.UUID
+	Feedname    sql.NullString
+}
+
+func (q *Queries) GetPostsByUser(ctx context.Context, arg GetPostsByUserParams) ([]GetPostsByUserRow, error) {
 	rows, err := q.db.QueryContext(ctx, getPostsByUser, arg.Name, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Post
+	var items []GetPostsByUserRow
 	for rows.Next() {
-		var i Post
+		var i GetPostsByUserRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.CreatedAt,
@@ -89,6 +101,7 @@ func (q *Queries) GetPostsByUser(ctx context.Context, arg GetPostsByUserParams) 
 			&i.Description,
 			&i.PublishedAt,
 			&i.FeedID,
+			&i.Feedname,
 		); err != nil {
 			return nil, err
 		}
